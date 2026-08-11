@@ -61,9 +61,11 @@ export class NorthAdapter {
         const res = await this.transport.rpc(method, params);
         if (R.isOk(res)) return { ...res, method };
         last = res;
-        // Only keep trying when the method itself is missing. A gateway that
-        // is down will fail identically for every candidate, so stop early.
-        if (res.state !== 'not_configured') break;
+        // Keep trying when this build lacks the method, or rejected our
+        // params -- a later candidate may take a different shape. But stop
+        // immediately when the gateway itself is unreachable: every candidate
+        // would fail identically, and each attempt costs a process launch.
+        if (res.state === 'unavailable') break;
       }
       return last ?? R.unknown('No RPC candidates were attempted.', 'openclaw-cli');
     };
@@ -290,10 +292,17 @@ export class NorthAdapter {
 
   // -------------------------------------------------------------- security --
 
-  /** Tools actually in effect, which is what North can really do right now. */
+  /**
+   * Tools actually in effect, which is what North can really do right now.
+   *
+   * `tools.effective` is scoped to a session and rejects a call without one
+   * ("must have required property 'sessionKey'"). "main" is OpenClaw's default
+   * session key; the unscoped catalog is the fallback for builds that differ.
+   */
   async tools() {
     return this.firstAvailable(
       [
+        ['tools.effective', { sessionKey: 'main' }],
         ['tools.effective', {}],
         ['tools.catalog', {}],
       ],
