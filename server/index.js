@@ -100,40 +100,72 @@ function broadcast(event, payload) {
 }
 
 /**
+ * Observed cost of one CLI round trip, as a rough median.
+ *
+ * The configured intervals assume a fast transport. On a machine where each
+ * `openclaw` launch costs seconds, polling every 3s would queue work faster
+ * than it completes and peg a core for nothing.
+ */
+function observedRpcCost() {
+  const samples = transport.samples.slice(-12).map((s) => s.ms).filter(Number.isFinite);
+  if (samples.length < 3) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+/**
  * Polling only runs while at least one browser tab is listening. With no
  * dashboard open, the process sits idle at effectively zero CPU instead of
  * spawning PowerShell and openclaw calls into the void.
+ *
+ * Each loop reschedules itself *after* its work finishes rather than on a
+ * fixed interval, and stretches its delay to match what the transport
+ * actually costs. A slow OpenClaw CLI therefore makes the dashboard refresh
+ * less often instead of falling further behind.
  */
+/**
+ * Incremented on every stop. In-flight loops compare against it and exit, so a
+ * poll that was already awaiting a slow call cannot resurrect itself after the
+ * last browser tab closed.
+ */
+let pollGeneration = 0;
+let polling = false;
+
 function startPolling() {
-  if (pollTimers.length) return;
-  const tick = async (fn, interval) => {
-    const run = async () => {
-      if (clients.size === 0) return;
+  if (polling) return;
+  polling = true;
+  const generation = pollGeneration;
+
+  const loop = async (fn, baseInterval) => {
+    while (generation === pollGeneration && clients.size > 0) {
       try {
         await fn();
       } catch (err) {
         console.error('[poll]', err.message);
       }
-    };
-    await run();
-    return setInterval(run, interval);
+      if (generation !== pollGeneration || clients.size === 0) break;
+      // Never spend more than roughly half the wall clock polling.
+      const delay = Math.max(baseInterval, observedRpcCost() * 2);
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        pollTimers.push(timer);
+      });
+    }
   };
 
-  Promise.all([
-    tick(async () => broadcast('status', await buildOverview()), config.intervals.status),
-    tick(async () => {
-      const activity = await north.activity(60);
-      broadcast('activity', activity);
-      await metrics.refresh();
-      broadcast('metrics', metrics.snapshot());
-    }, config.intervals.activity),
-  ]).then((timers) => {
-    pollTimers = timers.filter(Boolean);
-  });
+  loop(async () => broadcast('status', await buildOverview()), config.intervals.status);
+  loop(async () => {
+    const activity = await north.activity(60);
+    broadcast('activity', activity);
+    await metrics.refresh();
+    broadcast('metrics', metrics.snapshot());
+  }, config.intervals.activity);
 }
 
 function stopPolling() {
-  for (const t of pollTimers) clearInterval(t);
+  pollGeneration++;
+  polling = false;
+  for (const t of pollTimers) clearTimeout(t);
   pollTimers = [];
 }
 

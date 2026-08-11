@@ -138,7 +138,10 @@ export function loadConfig(root) {
 
     // Command timeouts. A hung `openclaw` call must not wedge a panel.
     timeouts: {
-      rpc: Number(dash.rpcTimeoutMs || 8000),
+      // Generous by necessity. Each RPC is a full `openclaw` process launch,
+      // and on Windows the CLI's own startup has been measured at ~4.5s before
+      // it does any work. 8s left no headroom for the call itself.
+      rpc: Number(dash.rpcTimeoutMs || 30000),
       // Generous: a cold PowerShell host can take many seconds before the
       // warmup lands. Steady-state probes complete in a few milliseconds.
       system: Number(dash.systemTimeoutMs || 20000),
