@@ -193,6 +193,10 @@ export class CliTransport {
     this.version = null;
     /** Observed transport latency, newest last. Feeds the Performance page. */
     this.samples = [];
+    /** Concurrency control for process launches -- see withSlot(). */
+    this.active = 0;
+    this.queue = [];
+    this.maxConcurrent = Number(config.maxConcurrentCalls || 3);
   }
 
   get name() {
@@ -218,6 +222,40 @@ export class CliTransport {
   recordSample(method, ms, ok) {
     this.samples.push({ method, ms, ok, at: Date.now() });
     if (this.samples.length > 500) this.samples.splice(0, this.samples.length - 500);
+  }
+
+  /**
+   * Median cost of a recent call, in ms. 0 until we have enough samples.
+   * Callers use this to size cache lifetimes to the machine they are on
+   * rather than to an assumption: the same RPC costs ~120ms on Linux and
+   * ~11s on Windows, where every call is a process launch plus a handshake.
+   */
+  medianCost() {
+    const recent = this.samples.slice(-12).map((s) => s.ms).filter(Number.isFinite);
+    if (recent.length < 3) return 0;
+    const sorted = [...recent].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }
+
+  /**
+   * Cap concurrent process launches.
+   *
+   * A panel can want five RPCs at once. Five simultaneous `openclaw` launches
+   * each start their own Node runtime; on a machine where one already takes
+   * seconds, that contention makes every one of them slower. Queueing past
+   * the cap costs nothing in wall clock and keeps the machine responsive.
+   */
+  async withSlot(fn) {
+    if (this.active >= this.maxConcurrent) {
+      await new Promise((resolve) => this.queue.push(resolve));
+    }
+    this.active++;
+    try {
+      return await fn();
+    } finally {
+      this.active--;
+      this.queue.shift()?.();
+    }
   }
 
   /**
@@ -251,7 +289,9 @@ export class CliTransport {
       args.push('--url', this.config.gatewayUrlOverride);
     }
 
-    const res = await run(bin, args, { timeout: timeout ?? this.config.timeouts.rpc });
+    const res = await this.withSlot(() =>
+      run(bin, args, { timeout: timeout ?? this.config.timeouts.rpc }),
+    );
     this.recordSample(method, res.ms, res.ok);
 
     if (!res.ok) {
@@ -290,7 +330,9 @@ export class CliTransport {
     if (!bin) {
       return R.unavailable('The `openclaw` command was not found.', this.name);
     }
-    const res = await run(bin, args, { timeout: timeout ?? this.config.timeouts.rpc });
+    const res = await this.withSlot(() =>
+      run(bin, args, { timeout: timeout ?? this.config.timeouts.rpc }),
+    );
     this.recordSample(args.join(' '), res.ms, res.ok);
     if (!res.ok) {
       if (res.timedOut) return R.unavailable(`\`openclaw ${args[0]}\` timed out.`, this.name, res.ms);

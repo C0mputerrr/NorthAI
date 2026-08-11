@@ -20,12 +20,22 @@
   // "gatewayPort": 18789,
 
   // --- polling cadence, in milliseconds -----------------------------------
-  // Raise these to cut idle CPU further; lower them for a snappier feed.
-  // Polling only runs while a browser tab is actually open.
+  // These are *floors*, not fixed intervals. The dashboard measures what an
+  // OpenClaw call actually costs on this machine and stretches cache lifetimes
+  // to roughly 4x that, so a slow CLI means fewer refreshes rather than a
+  // growing backlog. On a fast setup these values apply as written.
+  //
+  // Once a value has been fetched it is served instantly and refreshed in the
+  // background, so only the first load of a page ever waits.
   "statusIntervalMs": 4000,
   "systemIntervalMs": 5000,
   "activityIntervalMs": 3000,
   "slowIntervalMs": 30000,
+
+  // Simultaneous `openclaw` process launches. Each starts its own Node
+  // runtime, so raising this is not free -- but going below 4 makes the
+  // Overview cost two sequential rounds instead of one.
+  "maxConcurrentCalls": 4,
 
   // --- timeouts, in milliseconds ------------------------------------------
   "rpcTimeoutMs": 8000,

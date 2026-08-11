@@ -235,6 +235,25 @@ Built to sit open all day:
   long-lived host makes each probe a few milliseconds.
 - **Cached and de-duplicated calls.** Four open tabs cause one underlying call,
   not four.
+- **Stale-while-revalidate.** Once a value exists it is served immediately and
+  refreshed behind you, so only the first load of a page ever waits. Measured
+  against a simulated 8s-per-call CLI: cold 8.4s, every subsequent load 11-24ms.
+- **Cache lifetimes scale to the machine.** The dashboard measures what an
+  OpenClaw call actually costs and stretches its TTLs to about 4x that. A slow
+  CLI means fewer refreshes rather than a growing backlog.
+
+### If OpenClaw calls are slow on your machine
+
+Each RPC is a full `openclaw` process launch plus a gateway handshake. On
+Windows this has been measured at ~11s per call, against ~120ms on Linux. The
+caching above hides it after the first load, but if you want it genuinely fast,
+OpenClaw ships an `admin-http-rpc` plugin exposing `POST /api/v1/admin/rpc`.
+Enabling it would let a future HTTP transport skip the process launch entirely.
+
+That is not wired up here, and deliberately so: it requires enabling a plugin in
+your OpenClaw config, and it would mean this dashboard holding a full-access
+operator token rather than delegating auth to the CLI. Both are decisions for
+the person running it, not defaults to inherit.
 - **SSE, not WebSocket**, for updates — the data flow is one-directional and SSE
   reconnects on its own.
 

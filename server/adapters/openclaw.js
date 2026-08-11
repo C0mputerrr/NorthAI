@@ -49,6 +49,20 @@ export class NorthAdapter {
   }
 
   /**
+   * Stretch a configured cache lifetime to match what the transport costs.
+   *
+   * The configured intervals assume a responsive gateway. Where a single RPC
+   * costs 11 seconds, re-fetching every 4 would mean the dashboard spends all
+   * its time refetching and none of it idle -- and the extra freshness is
+   * imaginary, since the value is already seconds old the moment it arrives.
+   * Fast transports keep the configured value.
+   */
+  ttl(base) {
+    const cost = this.transport.medianCost?.() ?? 0;
+    return Math.max(base, Math.round(cost * 4));
+  }
+
+  /**
    * Try a list of RPC methods in order, returning the first that answers.
    * OpenClaw's method surface shifts between releases, and a method this build
    * does not expose comes back as `not_configured` rather than a hard failure.
@@ -82,7 +96,7 @@ export class NorthAdapter {
 
   /** Richer service view: managed-service state plus a connectivity probe. */
   async gatewayStatus() {
-    return this.cache.get('gateway.status', this.config.intervals.status, async () => {
+    return this.cache.get('gateway.status', this.ttl(this.config.intervals.status), async () => {
       const rpc = await this.transport.rpc('status');
       if (R.isOk(rpc)) return rpc;
       // The RPC needs a live gateway. The CLI's own status command also reports
@@ -161,7 +175,7 @@ export class NorthAdapter {
 
   async sessions() {
     const res = await this.firstAvailable([['sessions.list', {}]], {
-      ttl: this.config.intervals.status,
+      ttl: this.ttl(this.config.intervals.status),
       key: 'sessions',
     });
     return R.mapOk(res, (payload) =>
@@ -183,7 +197,7 @@ export class NorthAdapter {
 
   async models() {
     const res = await this.firstAvailable([['models.list', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'models',
     });
     return R.mapOk(res, (payload) => {
@@ -207,7 +221,7 @@ export class NorthAdapter {
         ['usage.status', {}],
         ['usage.cost', {}],
       ],
-      { ttl: this.config.intervals.status, key: 'usage' },
+      { ttl: this.ttl(this.config.intervals.slow), key: 'usage' },
     );
     return R.mapOk(res, (payload) => ({
       inputTokens: pick(payload, 'inputTokens', 'input', 'promptTokens') ?? null,
@@ -229,7 +243,7 @@ export class NorthAdapter {
    */
   async activity(limit = 80) {
     const res = await this.firstAvailable([['audit.activity.list', { limit }]], {
-      ttl: this.config.intervals.activity,
+      ttl: this.ttl(this.config.intervals.activity),
       key: `activity:${limit}`,
     });
     if (R.isOk(res)) {
@@ -242,7 +256,7 @@ export class NorthAdapter {
   /** Raw structured log lines, used for the activity fallback and latency. */
   async logs(limit = 300) {
     return this.firstAvailable([['logs.tail', { limit }]], {
-      ttl: this.config.intervals.activity,
+      ttl: this.ttl(this.config.intervals.activity),
       key: `logs:${limit}`,
     });
   }
@@ -251,7 +265,7 @@ export class NorthAdapter {
 
   async skills() {
     const res = await this.firstAvailable([['skills.status', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'skills',
     });
     return R.mapOk(res, (payload) =>
@@ -271,21 +285,21 @@ export class NorthAdapter {
   /** Channel connectivity as OpenClaw itself reports it. */
   async channels() {
     return this.firstAvailable([['channels.status', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'channels',
     });
   }
 
   async plugins() {
     return this.firstAvailable([['plugins.list', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'plugins',
     });
   }
 
   async nodes() {
     return this.firstAvailable([['node.list', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'nodes',
     });
   }
@@ -306,27 +320,27 @@ export class NorthAdapter {
         ['tools.effective', {}],
         ['tools.catalog', {}],
       ],
-      { ttl: this.config.intervals.slow, key: 'tools' },
+      { ttl: this.ttl(this.config.intervals.slow), key: 'tools' },
     );
   }
 
   async execApprovals() {
     return this.firstAvailable([['exec.approvals.get', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'exec.approvals',
     });
   }
 
   async approvalHistory(limit = 25) {
     return this.firstAvailable([['approval.history', { limit }]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'approval.history',
     });
   }
 
   async commands() {
     return this.firstAvailable([['commands.list', {}]], {
-      ttl: this.config.intervals.slow,
+      ttl: this.ttl(this.config.intervals.slow),
       key: 'commands',
     });
   }

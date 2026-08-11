@@ -196,6 +196,14 @@ if (process.argv.includes('--serve')) {
     if (pIdx !== -1) {
       try { params = JSON.parse(args[pIdx + 1]); } catch { /* keep defaults */ }
     }
+    // OPENCLAW_FAKE_DELAY_MS reproduces a slow real-world CLI, where each
+    // call costs seconds of process startup plus gateway handshake.
+    const delay = Number(process.env.OPENCLAW_FAKE_DELAY_MS ?? 0);
+    if (delay > 0) {
+      // Sleep rather than spin: we are simulating time spent waiting on
+      // process startup and a handshake, not CPU work.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+    }
     const fn = METHODS[method];
     if (!fn) {
       process.stderr.write(`unknown method ${method}\n`);

@@ -148,6 +148,13 @@ export function loadConfig(root) {
       console: Number(dash.consoleTimeoutMs || 120000),
     },
 
+    // Cap on simultaneous `openclaw` process launches. Each one starts its
+    // own Node runtime, so oversubscribing makes every call slower -- but a
+    // cap below what a page needs is worse, because the page then costs two
+    // sequential rounds instead of one. The Overview, the widest page, needs
+    // four RPCs, so four is the floor that keeps a cold load to a single round.
+    maxConcurrentCalls: Number(dash.maxConcurrentCalls || 4),
+
     // Console writes go through the gateway and can act on the machine.
     // Off unless explicitly enabled.
     allowConsole: dash.allowConsole !== false,
