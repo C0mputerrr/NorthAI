@@ -101,6 +101,19 @@ export class WindowsAdapter {
       }
     });
 
+    // Warm the worker off the critical path.
+    //
+    // A cold PowerShell host pays the Add-Type C# compile plus first-touch cost
+    // on every CIM class it queries -- together enough to blow the timeout on
+    // the first real request. Firing an unattended probe now absorbs that, so
+    // the first request a person actually waits on is a warm one. Id 0 has no
+    // pending entry, so the reply is read and discarded.
+    try {
+      this.child.stdin.write(`${JSON.stringify({ id: 0, op: 'all' })}\n`);
+    } catch {
+      // If this fails the worker is already gone; the exit handler reports it.
+    }
+
     this.startFailure = null;
     return true;
   }

@@ -43,59 +43,90 @@ function Test-Protected([string]$name) {
   return $Script:Protected -contains $name.ToLowerInvariant()
 }
 
+# Slow-changing facts are cached so the common path stays cheap.
+# Get-NetAdapter and Win32_LogicalDisk each cost hundreds of milliseconds and
+# their answers barely change; querying them on every poll was what pushed the
+# first snapshot past its timeout.
+$Script:Cache = @{}
+
+function Get-Cached([string]$key, [int]$ttlSeconds, [scriptblock]$producer) {
+  $hit = $Script:Cache[$key]
+  if ($hit -and ((Get-Date) - $hit.At).TotalSeconds -lt $ttlSeconds) { return $hit.Value }
+  $value = & $producer
+  $Script:Cache[$key] = @{ At = (Get-Date); Value = $value }
+  return $value
+}
+
 function Get-SystemSnapshot {
   $os = Get-CimInstance Win32_OperatingSystem
 
-  # PerfFormattedData is far cheaper than Get-Counter, which blocks ~1s for a
-  # sampling interval.
+  # Win32_Processor.LoadPercentage is consistently faster than the perf-counter
+  # class, which can block for seconds on its first query in a session.
   $cpuPct = $null
   try {
-    $cpu = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'"
-    if ($cpu) { $cpuPct = [double]$cpu.PercentProcessorTime }
+    $load = (Get-CimInstance Win32_Processor -ErrorAction Stop | Measure-Object -Property LoadPercentage -Average).Average
+    if ($null -ne $load) { $cpuPct = [double]$load }
   } catch { $cpuPct = $null }
+  if ($null -eq $cpuPct) {
+    try {
+      $cpu = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'" -ErrorAction Stop
+      if ($cpu) { $cpuPct = [double]$cpu.PercentProcessorTime }
+    } catch { $cpuPct = $null }
+  }
 
   $totalKb = [double]$os.TotalVisibleMemorySize
   $freeKb  = [double]$os.FreePhysicalMemory
 
-  $disks = @()
-  try {
-    foreach ($d in Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3') {
-      if ($null -eq $d.Size -or $d.Size -eq 0) { continue }
-      $disks += [ordered]@{
-        drive      = $d.DeviceID
-        label      = $d.VolumeName
-        totalBytes = [double]$d.Size
-        freeBytes  = [double]$d.FreeSpace
+  # Free space moves, but the drive list does not -- 20s is plenty.
+  $disks = Get-Cached 'disks' 20 {
+    $out = @()
+    try {
+      foreach ($d in Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction Stop) {
+        if ($null -eq $d.Size -or $d.Size -eq 0) { continue }
+        $out += [ordered]@{
+          drive      = $d.DeviceID
+          label      = $d.VolumeName
+          totalBytes = [double]$d.Size
+          freeBytes  = [double]$d.FreeSpace
+        }
       }
-    }
-  } catch {}
+    } catch {}
+    ,$out
+  }
 
   # Absent on desktops. Null means "no battery", not "unknown".
-  $battery = $null
-  try {
-    $b = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($b) {
-      $battery = [ordered]@{
-        percent           = $b.EstimatedChargeRemaining
-        # 2 = on AC power.
-        charging          = ($b.BatteryStatus -eq 2)
-        status            = $b.BatteryStatus
-        runtimeMinutes    = if ($b.EstimatedRunTime -and $b.EstimatedRunTime -lt 71582788) { $b.EstimatedRunTime } else { $null }
-      }
-    }
-  } catch {}
+  $battery = Get-Cached 'battery' 15 {
+    try {
+      $b = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($b) {
+        [ordered]@{
+          percent        = $b.EstimatedChargeRemaining
+          # 2 = on AC power.
+          charging       = ($b.BatteryStatus -eq 2)
+          status         = $b.BatteryStatus
+          # 71582788 is the sentinel Windows reports for "unknown runtime".
+          runtimeMinutes = $(if ($b.EstimatedRunTime -and $b.EstimatedRunTime -lt 71582788) { $b.EstimatedRunTime } else { $null })
+        }
+      } else { $null }
+    } catch { $null }
+  }
 
-  $net = @()
-  try {
-    foreach ($a in Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' }) {
-      $net += [ordered]@{
-        name      = $a.Name
-        type      = $a.MediaType
-        linkMbps  = if ($a.LinkSpeed) { $a.LinkSpeed } else { $null }
-        mac       = $null   # deliberately omitted: hardware identifier, no diagnostic value here
+  $network = Get-Cached 'network' 30 {
+    $net = @()
+    try {
+      foreach ($a in Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' }) {
+        $net += [ordered]@{
+          name     = $a.Name
+          type     = $a.MediaType
+          linkMbps = $(if ($a.LinkSpeed) { $a.LinkSpeed } else { $null })
+          mac      = $null   # deliberately omitted: hardware identifier, no diagnostic value here
+        }
       }
-    }
-  } catch {}
+    } catch {}
+    $online = $false
+    try { $online = (Get-NetConnectionProfile -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0 } catch {}
+    [ordered]@{ online = $online; adapters = $net }
+  }
 
   return [ordered]@{
     host        = $env:COMPUTERNAME
@@ -110,10 +141,7 @@ function Get-SystemSnapshot {
     }
     disks       = $disks
     battery     = $battery
-    network     = [ordered]@{
-      online   = (Get-NetConnectionProfile -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
-      adapters = $net
-    }
+    network     = $network
     bootTime    = $os.LastBootUpTime.ToUniversalTime().ToString('o')
     uptimeMs    = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalMilliseconds)
   }
@@ -129,18 +157,20 @@ function Get-AppSnapshot {
     }
   } catch {}
 
+  # Enumerate once. Get-Process is the expensive call here, and the two views
+  # below (windowed apps, heaviest processes) are both derived from it.
+  $all = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { -not (Test-Protected $_.ProcessName) })
+
   $windowed = @()
   $active = $null
 
-  foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
-    $name = $p.ProcessName
-    if (Test-Protected $name) { continue }
+  foreach ($p in $all) {
     $title = $p.MainWindowTitle
     if ([string]::IsNullOrWhiteSpace($title)) { continue }
 
     $entry = [ordered]@{
       pid         = $p.Id
-      name        = $name
+      name        = $p.ProcessName
       title       = $title
       memoryBytes = [double]$p.WorkingSet64
       startedAt   = $(try { $p.StartTime.ToUniversalTime().ToString('o') } catch { $null })
@@ -153,10 +183,7 @@ function Get-AppSnapshot {
   # Top memory consumers, including non-windowed ones, minus protected names.
   # This is what answers "what is using the most memory?".
   $heavy = @()
-  foreach ($p in (Get-Process -ErrorAction SilentlyContinue |
-                  Where-Object { -not (Test-Protected $_.ProcessName) } |
-                  Sort-Object WorkingSet64 -Descending |
-                  Select-Object -First 12)) {
+  foreach ($p in ($all | Sort-Object WorkingSet64 -Descending | Select-Object -First 12)) {
     $heavy += [ordered]@{
       pid         = $p.Id
       name        = $p.ProcessName

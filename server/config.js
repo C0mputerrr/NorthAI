@@ -83,6 +83,14 @@ export function loadConfig(root) {
     dash.gatewayPort || env.OPENCLAW_GATEWAY_PORT || oc.values.port || DEFAULT_GATEWAY_PORT,
   );
 
+  // Did the user deliberately point us somewhere other than what OpenClaw's
+  // own config says? Only then do we override the CLI's target -- otherwise
+  // we let it resolve the gateway itself, which is what it does correctly.
+  const explicitTarget = Boolean(dash.gatewayPort || env.OPENCLAW_GATEWAY_PORT || env.OPENCLAW_GATEWAY_URL);
+  const gatewayUrlOverride = explicitTarget
+    ? env.OPENCLAW_GATEWAY_URL || `ws://127.0.0.1:${gatewayPort}`
+    : null;
+
   const logDir = dash.logDir || null;
   const logFile = oc.values.logFile
     ? isAbsolute(oc.values.logFile)
@@ -101,6 +109,7 @@ export function loadConfig(root) {
     openclawHome,
     gatewayPort,
     gatewayUrl: env.OPENCLAW_GATEWAY_URL || `ws://127.0.0.1:${gatewayPort}`,
+    gatewayUrlOverride,
     healthUrl: `http://127.0.0.1:${gatewayPort}`,
 
     // Where OpenClaw writes its JSONL logs. Discovered at runtime when unset.
@@ -130,7 +139,9 @@ export function loadConfig(root) {
     // Command timeouts. A hung `openclaw` call must not wedge a panel.
     timeouts: {
       rpc: Number(dash.rpcTimeoutMs || 8000),
-      system: Number(dash.systemTimeoutMs || 10000),
+      // Generous: a cold PowerShell host can take many seconds before the
+      // warmup lands. Steady-state probes complete in a few milliseconds.
+      system: Number(dash.systemTimeoutMs || 20000),
       console: Number(dash.consoleTimeoutMs || 120000),
     },
 

@@ -29,7 +29,7 @@
 
   // --- timeouts, in milliseconds ------------------------------------------
   "rpcTimeoutMs": 8000,
-  "systemTimeoutMs": 10000,
+  "systemTimeoutMs": 20000,
   "consoleTimeoutMs": 120000,
 
   // --- capabilities -------------------------------------------------------

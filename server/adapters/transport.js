@@ -242,7 +242,14 @@ export class CliTransport {
     if (params && Object.keys(params).length > 0) {
       args.push('--params', JSON.stringify(params));
     }
-    if (this.config.gatewayPort) args.push('--port', String(this.config.gatewayPort));
+    // No port/url flag by default. `gateway call` on current builds rejects
+    // `--port` outright ("does not recognize option"), and it does not need
+    // one: the CLI resolves the gateway from the same ~/.openclaw/openclaw.json
+    // we read. Only pass an explicit target when the user deliberately
+    // overrode it, in which case the CLI's own config would be wrong.
+    if (this.config.gatewayUrlOverride) {
+      args.push('--url', this.config.gatewayUrlOverride);
+    }
 
     const res = await run(bin, args, { timeout: timeout ?? this.config.timeouts.rpc });
     this.recordSample(method, res.ms, res.ok);
