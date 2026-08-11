@@ -1,0 +1,11 @@
+# Local settings. May contain machine-specific paths; never commit it.
+north.config.json
+
+node_modules/
+npm-debug.log*
+*.log
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,44 @@
+{
+  // North Command Center settings. Copy to `north.config.json` to use.
+  // Every field is optional -- the dashboard discovers sane values at startup.
+
+  // --- dashboard server ---------------------------------------------------
+  // Leave `host` on loopback. Changing it exposes the dashboard, and with it a
+  // command channel to North, on your network.
+  "host": "127.0.0.1",
+  "port": 4300,
+
+  // --- reaching OpenClaw --------------------------------------------------
+  // Set this if `openclaw` is not on PATH. Point it at the real executable,
+  // e.g. "C:\\Users\\you\\AppData\\Roaming\\npm\\openclaw.cmd".
+  // "openclawBin": "openclaw",
+
+  // Defaults to %USERPROFILE%\.openclaw
+  // "openclawHome": "C:\\Users\\you\\.openclaw",
+
+  // Overrides the port read from openclaw.json (default 18789).
+  // "gatewayPort": 18789,
+
+  // --- polling cadence, in milliseconds -----------------------------------
+  // Raise these to cut idle CPU further; lower them for a snappier feed.
+  // Polling only runs while a browser tab is actually open.
+  "statusIntervalMs": 4000,
+  "systemIntervalMs": 5000,
+  "activityIntervalMs": 3000,
+  "slowIntervalMs": 30000,
+
+  // --- timeouts, in milliseconds ------------------------------------------
+  "rpcTimeoutMs": 8000,
+  "systemTimeoutMs": 10000,
+  "consoleTimeoutMs": 120000,
+
+  // --- capabilities -------------------------------------------------------
+  // The Console sends natural-language requests to North, which can act on
+  // your machine. Set false to make the dashboard strictly read-only.
+  "allowConsole": true,
+
+  // Enables the Open / Focus / Close buttons on the System page. Off by
+  // default: closing an app can lose unsaved work. Protected OS processes are
+  // never actionable regardless of this setting.
+  "allowProcessActions": false
+}

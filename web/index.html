@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>North Command Center</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3l3.6 9.2L29 16l-9.4 3.8L16 29l-3.6-9.2L3 16l9.4-3.8z' fill='%237fd7c4'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- Rail ---------------------------------------------------------------->
+  <nav class="rail" aria-label="Primary">
+    <div class="rail__brand">
+      <svg class="rail__mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M16 3l3.6 9.2L29 16l-9.4 3.8L16 29l-3.6-9.2L3 16l9.4-3.8z"/>
+      </svg>
+      <div class="rail__title">
+        <strong>North</strong>
+        <span>Command Center</span>
+      </div>
+    </div>
+
+    <ul class="rail__nav" role="list">
+      <li><a href="#/overview"     data-nav="overview">Overview</a></li>
+      <li><a href="#/activity"     data-nav="activity">Activity</a></li>
+      <li><a href="#/console"      data-nav="console">Console</a></li>
+      <li><a href="#/system"       data-nav="system">System</a></li>
+      <li><a href="#/performance"  data-nav="performance">Performance</a></li>
+      <li><a href="#/integrations" data-nav="integrations">Integrations</a></li>
+      <li><a href="#/skills"       data-nav="skills">Skills</a></li>
+      <li><a href="#/security"     data-nav="security">Security</a></li>
+    </ul>
+
+    <div class="rail__foot">
+      <div class="pulse" id="rail-pulse" data-state="connecting">
+        <span class="pulse__dot"></span>
+        <span class="pulse__label">connecting</span>
+      </div>
+      <p class="rail__meta" id="rail-meta"></p>
+    </div>
+  </nav>
+
+  <!-- Main ---------------------------------------------------------------->
+  <div class="main">
+    <header class="topbar" id="topbar">
+      <div class="topbar__id">
+        <h1 id="page-title">Overview</h1>
+        <p id="page-sub"></p>
+      </div>
+      <div class="topbar__stats" id="topbar-stats"></div>
+    </header>
+
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

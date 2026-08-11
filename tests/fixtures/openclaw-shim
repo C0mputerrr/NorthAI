@@ -1,0 +1,4 @@
+#!/bin/sh
+# Presents fake-openclaw.mjs under the name the transport expects.
+# Development only -- see README, "Working without a live gateway".
+exec node "$(dirname "$0")/fake-openclaw.mjs" "$@"
