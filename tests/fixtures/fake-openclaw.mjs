@@ -165,12 +165,29 @@ const METHODS = {
       { at: new Date(now - 7_200_000).toISOString(), summary: 'Remove-Item C:\\temp\\*', decision: 'denied' },
     ],
   }),
-  'sessions.dispatch': ({ message }) => ({
-    reply: `(fake gateway) I received: "${message}". A real North would act on this.`,
-    sessionId: 'sess_main',
-  }),
-  'chat.send': ({ message }) => ({ reply: `(fake gateway) echo: ${message}` }),
+  // Real gateways reject these without a sessionKey, and do so with exit code
+  // zero and an {ok:false} envelope rather than a non-zero exit. Reproduced
+  // here so the transport's envelope handling and the adapter's parameter
+  // fallback are actually exercised.
+  'sessions.dispatch': ({ message, sessionKey }) =>
+    sessionKey
+      ? { reply: `(fake gateway) I received: "${message}". A real North would act on this.`, sessionKey }
+      : REJECT("invalid sessions.dispatch params: must have required property 'sessionKey'"),
+  'chat.send': ({ message, sessionKey }) =>
+    sessionKey
+      ? { reply: `(fake gateway) echo: ${message}`, sessionKey }
+      : REJECT("invalid chat.send params: must have required property 'sessionKey'"),
 };
+
+/** Marker for a rejection returned with a success exit code. */
+const REJECT_MARK = Symbol('reject');
+function REJECT(message) {
+  return {
+    [REJECT_MARK]: true,
+    ok: false,
+    error: { type: 'gateway_request_error', code: 'INVALID_REQUEST', message, retryable: false },
+  };
+}
 
 // ---------------------------------------------------------------- HTTP mode --
 
@@ -209,8 +226,15 @@ if (process.argv.includes('--serve')) {
       process.stderr.write(`unknown method ${method}\n`);
       process.exit(1);
     }
+    const result = fn(params);
+    // A rejection is written bare, with exit 0 -- exactly as a real gateway
+    // reports an invalid request.
+    if (result && result.ok === false) {
+      process.stdout.write(JSON.stringify({ ok: false, error: result.error }));
+      process.exit(0);
+    }
     // Mirror the documented envelope so the transport's unwrapping is exercised.
-    process.stdout.write(JSON.stringify({ ok: true, payload: fn(params) }));
+    process.stdout.write(JSON.stringify({ ok: true, payload: result }));
     process.exit(0);
   }
 

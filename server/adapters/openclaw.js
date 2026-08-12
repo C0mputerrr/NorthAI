@@ -356,11 +356,20 @@ export class NorthAdapter {
    */
   async send(text, { sessionId } = {}) {
     const started = Date.now();
-    const params = sessionId ? { sessionId, message: text } : { message: text };
 
-    const candidates = sessionId
-      ? [['sessions.send', params], ['chat.send', { ...params, session: sessionId }]]
-      : [['sessions.dispatch', params], ['chat.send', params], ['send', params]];
+    // Current builds address a conversation by `sessionKey` and reject a call
+    // without one ("invalid chat.send params: must have required property
+    // 'sessionKey'"). "main" is the default key. The later candidates carry
+    // older parameter spellings so this keeps working across versions.
+    const key = sessionId || 'main';
+    const candidates = [
+      ['chat.send', { sessionKey: key, message: text }],
+      ['sessions.send', { sessionKey: key, message: text }],
+      ['sessions.dispatch', { sessionKey: key, message: text }],
+      ['chat.send', sessionId ? { sessionId, message: text } : { message: text }],
+      ['sessions.dispatch', { message: text }],
+      ['send', { message: text }],
+    ];
 
     let last = null;
     for (const [method, p] of candidates) {
@@ -373,7 +382,11 @@ export class NorthAdapter {
         );
       }
       last = res;
-      if (res.state !== 'not_configured') break;
+      // Keep trying when the method is missing or our params were rejected --
+      // a later candidate may use the shape this build wants. Stop only when
+      // the gateway is unreachable, where every attempt would fail the same
+      // way and each one costs a process launch.
+      if (res.state === 'unavailable') break;
     }
     return last ?? R.error('No send method available on this OpenClaw build.', 'north-adapter');
   }

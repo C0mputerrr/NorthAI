@@ -185,6 +185,34 @@ export function extractJson(stdout) {
   return { ok: false, error: 'Truncated JSON in output' };
 }
 
+/**
+ * Turn an OpenClaw error envelope into one readable line.
+ *
+ * The raw shape is
+ *   {"ok":false,"error":{"type":"gateway_request_error","code":"INVALID_REQUEST",
+ *    "message":"invalid chat.send params: must have required property 'sessionKey'"}}
+ * which is accurate and unreadable. Only the code and message carry meaning to
+ * a person looking at the Console, so that is all we surface.
+ */
+export function describeRpcError(value) {
+  const err = value?.error ?? value;
+  if (!err || typeof err !== 'object') return null;
+  const message = err.message ?? err.reason ?? err.detail;
+  const code = err.code ?? err.type;
+  if (message && code && !String(message).includes(code)) return `${code}: ${message}`;
+  return message ? String(message) : code ? String(code) : null;
+}
+
+/** Pull a readable message out of CLI output that may or may not be JSON. */
+function errorDetail(text, fallback) {
+  const parsed = extractJson(String(text ?? ''));
+  if (parsed.ok) {
+    const described = describeRpcError(parsed.value);
+    if (described) return cleanError(described);
+  }
+  return cleanError(text) || fallback;
+}
+
 export class CliTransport {
   constructor(config) {
     this.config = config;
@@ -295,7 +323,7 @@ export class CliTransport {
     this.recordSample(method, res.ms, res.ok);
 
     if (!res.ok) {
-      const detail = cleanError(res.stderr || res.stdout) || `exit code ${res.code}`;
+      const detail = errorDetail(res.stderr || res.stdout, `exit code ${res.code}`);
       if (res.timedOut) {
         return R.unavailable(`Gateway did not answer ${method} within the timeout.`, this.name, res.ms);
       }
@@ -314,9 +342,20 @@ export class CliTransport {
     if (!parsed.ok) {
       return R.error(`Could not parse ${method} output: ${parsed.error}`, this.name, res.ms);
     }
+    const v = parsed.value;
+
+    // A rejected call can still exit zero, carrying {ok:false, error:{...}}.
+    // Without this check the failure envelope would be handed upward as data
+    // and rendered as though the call had succeeded.
+    if (v && typeof v === 'object' && v.ok === false) {
+      const detail = describeRpcError(v) ?? `${method} was rejected.`;
+      return /required property|invalid .* params|INVALID_REQUEST/i.test(detail)
+        ? R.notConfigured(detail, this.name)   // wrong params: let the next candidate try
+        : R.error(detail, this.name, res.ms);
+    }
+
     // `gateway call` wraps successful payloads; unwrap when present so callers
     // see the method's own shape either way.
-    const v = parsed.value;
     const payload =
       v && typeof v === 'object' && !Array.isArray(v) && 'payload' in v && ('ok' in v || 'type' in v)
         ? v.payload
